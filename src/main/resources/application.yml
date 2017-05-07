@@ -1,0 +1,10 @@
+# Propriedade recuperada do gradle
+someProperty: '${project.name}'
+
+management:
+  security:
+    enabled: false
+
+info:
+  artifactId: '${project.name}'
+  version: '${project.version}'

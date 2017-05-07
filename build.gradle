@@ -1,0 +1,161 @@
+buildscript {
+    ext {
+        springBootVersion = '1.5.3.RELEASE'
+    }
+    repositories {
+        jcenter()
+        mavenCentral()
+    }
+    /**
+     * Adicionando dependencias no buildscript possibilita a utilizacao das classes dessas
+     * dependencias dentro do proprio script de build
+     */
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:${springBootVersion}")
+        classpath 'org.asciidoctor:asciidoctor-gradle-plugin:1.5.3' // Configuracao do Auto REST DOCS
+    }
+}
+
+apply plugin: 'java'
+apply plugin: 'eclipse'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'jacoco'
+apply plugin: 'org.asciidoctor.convert' // Configuracao do Auto REST DOCS
+
+version = '0.0.1-SNAPSHOT'
+sourceCompatibility = 1.8
+
+repositories {
+    mavenCentral()
+}
+
+bootRepackage {
+    mainClass = 'br.com.sample.GradleSampleApplication'
+}
+
+/**
+ * Task para disponibilizar as propriedades do script de build no contexto do Spring
+ */
+processResources {
+    expand(project.properties)
+}
+
+/**
+ * Exclusao de dependencias transitivas
+ */
+configurations {
+    compile.exclude module: 'spring-boot-starter-tomcat'
+    jsondoclet // Configuracao do Auto REST DOCS
+}
+
+/**
+ * Task para customizar o MANIFEST.MF gerado
+ */
+jar {
+    manifest {
+        attributes('Implementation-Title': 'Gradle Teste', 'Implementation-Version': version)
+    }
+    dependsOn asciidoctor
+}
+
+/*****************************************************************************
+ * Dependencias
+ *****************************************************************************/
+dependencies {
+    compile('org.springframework.boot:spring-boot-starter-actuator')
+    compile('org.springframework.boot:spring-boot-starter-web')
+    compile('org.springframework.boot:spring-boot-starter-undertow')
+    runtime('org.springframework.boot:spring-boot-devtools')
+    compileOnly('org.springframework.boot:spring-boot-configuration-processor')
+    compileOnly('org.projectlombok:lombok')
+    // Configuracao do Auto REST DOCS
+    testCompile('org.springframework.restdocs:spring-restdocs-core')
+    testCompile('org.springframework.restdocs:spring-restdocs-mockmvc')
+    testCompile('org.springframework.boot:spring-boot-starter-test')
+    testCompile('capital.scalable:spring-auto-restdocs-core:1.0.6')
+    jsondoclet('capital.scalable:spring-auto-restdocs-json-doclet:1.0.6')
+}
+
+/*****************************************************************************
+ * Configuracao do plugin do JaCoCo
+ *****************************************************************************/
+jacoco {
+    toolVersion = '0.7.9'
+    ext {
+        exclude = ['br/com/sample/model/**', '**/*GradleSampleApplication*']
+    }
+}
+
+jacocoTestReport {
+    reports {
+        html.enabled true // Default
+    }
+    afterEvaluate {
+        classDirectories = files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: jacoco.exclude)
+        })
+    }
+}
+
+jacocoTestCoverageVerification {
+    violationRules {
+        rule {
+            element = 'BUNDLE' // Default
+
+            limit {
+                counter = 'INSTRUCTION' // Default
+                value = 'COVEREDRATIO' // Default
+                minimum = 0.95
+            }
+        }
+    }
+    afterEvaluate {
+        classDirectories = files(classDirectories.files.collect {
+            fileTree(dir: it, exclude: jacoco.exclude)
+        })
+    }
+}
+
+jacocoTestReport.dependsOn('test')
+jacocoTestCoverageVerification.dependsOn('jacocoTestReport')
+
+/*****************************************************************************
+ * Configuracao do Auto REST DOCS
+ *****************************************************************************/
+ext {
+    snippetsDir = file("$buildDir/generated-snippets")
+    javadocJsonDir = file("$buildDir/generated-javadoc-json")
+}
+
+task jsonDoclet(type: Javadoc, dependsOn: compileJava) {
+    source = sourceSets.main.allJava
+    classpath = sourceSets.main.compileClasspath
+    destinationDir = javadocJsonDir
+    options.docletpath = configurations.jsondoclet.files.asType(List)
+    options.doclet = 'capital.scalable.restdocs.jsondoclet.ExtractDocumentationAsJsonDoclet'
+    options.memberLevel = JavadocMemberLevel.PACKAGE
+}
+
+test {
+    systemProperty 'org.springframework.restdocs.outputDir', snippetsDir
+    systemProperty 'org.springframework.restdocs.javadocJsonDir', javadocJsonDir
+
+    dependsOn jsonDoclet
+}
+
+asciidoctor {
+    sourceDir = file('src/test/asciidoc')
+    outputDir = file("$buildDir/generated-docs")
+    options backend: 'html', doctype: 'book'
+    attributes 'source-highlighter': 'highlightjs', 'snippets': snippetsDir
+
+    dependsOn jacocoTestCoverageVerification
+
+    doLast {
+        copy {
+            from file("$outputDir/html5")
+            into file("$sourceSets.main.output.resourcesDir/static/docs")
+            include 'api.html'
+        }
+    }
+}
